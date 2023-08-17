@@ -1,0 +1,48 @@
+FROM ubuntu:22.04
+
+RUN apt-get update && \
+    apt-get install -y \
+    gcc g++ build-essential cmake wget curl aria2 git
+
+RUN mkdir -p /app
+
+WORKDIR /app
+
+ENV OOBABOOGA_FLAGS=${OOBABOOGA_FLAGS} \
+    OOBABOOGA_INSTALL_GPU_CHOICE=${OOBABOOGA_INSTALL_GPU_CHOICE-a} \
+    OOBABOOGA_LAUNCH_AFTER_INSTALL=no
+# ENV CUDA_VISIBLE_DEVICES=1,0 # personal choice
+# ENV OOBABOOGA_INSTALL_GPU_CHOICE=a # ENV var for gpuchoice in webui.py
+# ENV OOBABOOGA_LAUNCH_AFTER_INSTALL=no # ENV var for not launching server.py, in webui.py
+
+RUN aria2c -x4 https://developer.download.nvidia.com/compute/cuda/11.7.0/local_installers/cuda_11.7.0_515.43.04_linux.run && \
+    /bin/bash /app/cuda_11.7.0_515.43.04_linux.run --silent --toolkit && \
+    rm -rf /app/cuda_11.7.0_515.43.04_linux.run
+
+RUN git clone https://github.com/Josh-XT/textgen-installers one-click-installers
+
+# https://developer.nvidia.com/cuda-gpus
+# for a rtx 2060: ARG TORCH_CUDA_ARCH_LIST="7.5"
+ARG TORCH_CUDA_ARCH_LIST="6.0;6.1;7.0;7.5;8.0;8.6+PTX"
+
+# monkey-patch until ENV vars would be accepted
+RUN /bin/bash -c "sed -i 's/gpuchoice = input(\"Input> \").lower()/gpuchoice = \"a\"/g' /app/one-click-installers/webui.py"
+RUN /bin/bash -c "sed -i 's/    run_cmd(f\"python server.py/#    run_cmd(f\"python server.py/g' /app/one-click-installers/webui.py"
+
+RUN /bin/bash /app/one-click-installers/start_linux.sh
+
+RUN /bin/bash -c "/app/one-click-installers/installer_files/conda/bin/conda init bash"
+
+RUN cd /app/one-click-installers/installer_files/env/lib/python3.10/site-packages/bitsandbytes && \
+    cp libbitsandbytes_cuda117.so libbitsandbytes_cpu.so
+
+RUN /app/one-click-installers/installer_files/conda/bin/conda init bash
+
+RUN echo "conda activate /app/one-click-installers/installer_files/env" >> ~/.bashrc
+
+# monkey-patch until ENV vars would be accepted
+RUN /bin/bash -c "sed -i 's/#    run_cmd(f\"python server.py/    run_cmd(f\"python server.py/g' /app/one-click-installers/webui.py"
+
+ENTRYPOINT /bin/bash /app/one-click-installers/update_linux.sh && /bin/bash /app/one-click-installers/start_linux.sh
+
+#rm -rf build.log && docker-compose -f docker-compose-local-nvidia.yml build --no-cache 2>&1 | tee -a build.log
